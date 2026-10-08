@@ -37,7 +37,8 @@ stages:
       inputs:
         command: 'build'
         projects: 'IdPicture.sln'
-        arguments: '--configuration  --no-restore'
+        configuration: ''
+        arguments: '--no-restore'
 
     - script: |
         dotnet tool install --global dotnet-ef
@@ -53,7 +54,8 @@ stages:
         command: 'publish'
         publishWebProjects: false
         projects: 'IdPicture/IdPicture.csproj'
-        arguments: '--configuration  --output /publish'
+        configuration: ''
+        arguments: '--output /publish'
         zipAfterPublish: true
 
     - task: PublishBuildArtifacts@1

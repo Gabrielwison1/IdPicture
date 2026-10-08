@@ -6,7 +6,6 @@ using System.Security.Claims;
 
 namespace IdPicture.Controllers
 {
-    [Authorize]
     [ApiController]
     [Route("api/[controller]")]
     public class TaxCalculatorController : ControllerBase
@@ -15,19 +14,25 @@ namespace IdPicture.Controllers
 
         public TaxCalculatorController(ITaxCalculatorService service) => _service = service;
 
-        private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        private bool IsAdmin => User.IsInRole("Admin");
+        private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier) ?? string.Empty;
 
+        // GET: api/TaxCalculator (Public Access - Anyone can view)
+        [AllowAnonymous]
         [HttpGet]
-        public async Task<IActionResult> GetAll() => Ok(await _service.GetAllAsync(CurrentUserId, IsAdmin));
+        public async Task<IActionResult> GetAll()
+            => Ok(await _service.GetAllAsync(CurrentUserId, isAdmin: true));
 
+        // GET: api/TaxCalculator/5 (Public Access - Anyone can view)
+        [AllowAnonymous]
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            var result = await _service.GetByIdAsync(id, CurrentUserId, IsAdmin);
-            return result == null ? NotFound("Record not found or access denied.") : Ok(result);
+            var result = await _service.GetByIdAsync(id, CurrentUserId, isAdmin: true);
+            return result == null ? NotFound("Record not found.") : Ok(result);
         }
 
+        // POST: api/TaxCalculator (Admin Only)
+        [Authorize(Roles = "Admin")]
         [HttpPost]
         public async Task<IActionResult> Create([FromBody] CreateTaxCalculatorDto dto)
         {
@@ -35,12 +40,20 @@ namespace IdPicture.Controllers
             return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
 
+        // PUT: api/TaxCalculator/5 (Admin Only)
+        [Authorize(Roles = "Admin")]
         [HttpPut("{id}")]
-        public async Task<IActionResult> Update(int id, [FromBody] CreateTaxCalculatorDto dto) =>
-            await _service.UpdateAsync(id, dto, CurrentUserId, IsAdmin) ? NoContent() : NotFound("Record not found or access denied.");
+        public async Task<IActionResult> Update(int id, [FromBody] CreateTaxCalculatorDto dto)
+            => await _service.UpdateAsync(id, dto, CurrentUserId, isAdmin: true)
+                ? NoContent()
+                : NotFound("Record not found.");
 
+        // DELETE: api/TaxCalculator/5 (Admin Only)
+        [Authorize(Roles = "Admin")]
         [HttpDelete("{id}")]
-        public async Task<IActionResult> Delete(int id) =>
-            await _service.DeleteAsync(id, CurrentUserId, IsAdmin) ? NoContent() : NotFound("Record not found or access denied.");
+        public async Task<IActionResult> Delete(int id)
+            => await _service.DeleteAsync(id, CurrentUserId, isAdmin: true)
+                ? NoContent()
+                : NotFound("Record not found.");
     }
 }

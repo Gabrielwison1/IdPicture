@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 using MyId.Application.DTOs;
@@ -14,68 +15,55 @@ namespace IdPicture.Controllers
     public class AuthController : ControllerBase
     {
         private readonly UserManager<ApplicationUser> _userManager;
-        private readonly RoleManager<IdentityRole> _roleManager;
-        private readonly IConfiguration _config;
+        private readonly IConfiguration _configuration;
 
-        public AuthController(UserManager<ApplicationUser> userManager, RoleManager<IdentityRole> roleManager, IConfiguration config)
+        public AuthController(UserManager<ApplicationUser> userManager, IConfiguration configuration)
         {
             _userManager = userManager;
-            _roleManager = roleManager;
-            _config = config;
+            _configuration = configuration;
         }
 
-        [HttpPost("register")]
-        public async Task<IActionResult> Register([FromBody] RegisterDto dto)
-        {
-            var userExists = await _userManager.FindByEmailAsync(dto.Email);
-            if (userExists != null) return BadRequest("User already exists.");
-
-            var user = new ApplicationUser { UserName = dto.Email, Email = dto.Email, FullName = dto.FullName };
-            var result = await _userManager.CreateAsync(user, dto.Password);
-
-            if (!result.Succeeded) return BadRequest(result.Errors);
-
-            string role = string.Equals(dto.Role, "Admin", StringComparison.OrdinalIgnoreCase) ? "Admin" : "User";
-            if (!await _roleManager.RoleExistsAsync(role))
-                await _roleManager.CreateAsync(new IdentityRole(role));
-
-            await _userManager.AddToRoleAsync(user, role);
-
-            return Ok(new { Message = "User registered successfully!" });
-        }
-
+        // POST: api/Auth/login (Only Admin Login)
+        [AllowAnonymous]
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginDto dto)
         {
             var user = await _userManager.FindByEmailAsync(dto.Email);
             if (user == null || !await _userManager.CheckPasswordAsync(user, dto.Password))
+            {
                 return Unauthorized("Invalid credentials.");
+            }
 
             var userRoles = await _userManager.GetRolesAsync(user);
+
+            // Generate JWT Token
             var authClaims = new List<Claim>
             {
                 new Claim(ClaimTypes.NameIdentifier, user.Id),
-                new Claim(ClaimTypes.Email, user.Email!),
+                new Claim(ClaimTypes.Email, user.Email ?? string.Empty),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
             };
 
             foreach (var role in userRoles)
+            {
                 authClaims.Add(new Claim(ClaimTypes.Role, role));
+            }
 
-            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["Jwt:Key"]!));
+            var jwtKey = _configuration["Jwt:Key"] ?? "SUPER_SECRET_KEY_FOR_JWT_TOKEN_AUTHENTICATION_12345!";
+            var authSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
+
             var token = new JwtSecurityToken(
-                issuer: _config["Jwt:Issuer"],
-                audience: _config["Jwt:Audience"],
-                expires: DateTime.UtcNow.AddHours(8),
+                issuer: _configuration["Jwt:Issuer"] ?? "IdPicture",
+                audience: _configuration["Jwt:Audience"] ?? "IdPictureUsers",
+                expires: DateTime.UtcNow.AddDays(7),
                 claims: authClaims,
-                signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256)
+                signingCredentials: new SigningCredentials(authSigningKey, SecurityAlgorithms.HmacSha256)
             );
 
-            return Ok(new AuthResponseDto
+            return Ok(new
             {
-                Token = new JwtSecurityTokenHandler().WriteToken(token),
-                UserId = user.Id,
-                Role = userRoles.FirstOrDefault() ?? "User"
+                token = new JwtSecurityTokenHandler().WriteToken(token),
+                expiration = token.ValidTo
             });
         }
     }

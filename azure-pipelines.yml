@@ -14,7 +14,7 @@ variables:
 
 stages:
 - stage: BuildAndMigrate
-  displayName: 'Build, Run EF Migrations, & Package'
+  displayName: 'Build and Package'
   jobs:
   - job: BuildJob
     pool:
@@ -66,9 +66,9 @@ stages:
         artifact: 'drop'
 
 - stage: Deploy
-  displayName: 'Deploy Web API to Azure App Service'
-  dependsOn: BuildAndMigrate
-  condition: succeeded()
+  displayName: 'Deploy Web API'
+  dependsOn: 'BuildAndMigrate'
+  condition: succeeded('BuildAndMigrate')
   jobs:
   - deployment: DeployJob
     pool:

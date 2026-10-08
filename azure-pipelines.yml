@@ -37,7 +37,7 @@ stages:
       inputs:
         command: 'build'
         projects: 'IdPicture.sln'
-        configuration: ''
+        configuration: '$(buildConfiguration)'
         arguments: '--no-restore'
 
     - script: |
@@ -55,37 +55,41 @@ stages:
         command: 'publish'
         publishWebProjects: false
         projects: 'IdPicture/IdPicture.csproj'
-        configuration: ''
-        arguments: '--no-restore --output /publish'
+        configuration: '$(buildConfiguration)'
+        arguments: '--no-restore --output $(Build.ArtifactStagingDirectory)/publish'
         zipAfterPublish: true
 
-    - task: PublishBuildArtifacts@1
+    - task: PublishPipelineArtifact@1
       displayName: 'Publish Build Artifacts'
       inputs:
-        PathtoPublish: '/publish'
-        ArtifactName: 'drop'
+        targetPath: '$(Build.ArtifactStagingDirectory)/publish'
+        artifact: 'drop'
 
 - stage: Deploy
   displayName: 'Deploy Web API to Azure App Service'
   dependsOn: BuildAndMigrate
   condition: succeeded()
   jobs:
-  - job: DeployJob
+  - deployment: DeployJob
     pool:
       vmImage: 'ubuntu-latest'
-    steps:
-    - task: DownloadBuildArtifacts@0
-      inputs:
-        buildType: 'current'
-        downloadType: 'single'
-        artifactName: 'drop'
-        downloadPath: ''
+    environment: 'Production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@2
+            displayName: 'Download Build Artifacts'
+            inputs:
+              buildType: 'current'
+              artifact: 'drop'
+              targetPath: '$(Pipeline.Workspace)/drop'
 
-    - task: AzureWebApp@1
-      displayName: 'Azure App Service Deploy'
-      inputs:
-        azureSubscription: ''
-        appType: 'webApp'
-        appName: ''
-        package: '/drop/*.zip'
-        appSettings: '-ConnectionStrings:DefaultConnection ""'
+          - task: AzureWebApp@1
+            displayName: 'Azure App Service Deploy'
+            inputs:
+              azureSubscription: '$(azureServiceConnection)'
+              appType: 'webApp'
+              appName: '$(webAppName)'
+              package: '$(Pipeline.Workspace)/drop/*.zip'
+              appSettings: '-ConnectionStrings:DefaultConnection "$(DefaultConnection)"'

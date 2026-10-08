@@ -56,7 +56,7 @@ stages:
         publishWebProjects: false
         projects: 'IdPicture/IdPicture.csproj'
         configuration: ''
-        arguments: '--output /publish'
+        arguments: '--no-restore --output /publish'
         zipAfterPublish: true
 
     - task: PublishBuildArtifacts@1

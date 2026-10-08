@@ -1,75 +1,103 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using MyId.Application.Interface;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Hosting;
 using MyId.Application.DTOs;
+using MyId.Application.Interface;
 using MyId.Domain.Entities;
-using System.Threading.Tasks;
 
 namespace MyId.Application.Services
 {
-    public class GalleryService: IGalleryService
+    public class GalleryService : IGalleryService
     {
-        private readonly IGalleryRepository _galleryRepository;
+        private readonly IGalleryRepository _repository;
         private readonly IWebHostEnvironment _env;
-        public GalleryService(IGalleryRepository galleryRepository, IWebHostEnvironment env)
+
+        public GalleryService(IGalleryRepository repository, IWebHostEnvironment env)
         {
-            _galleryRepository = galleryRepository;
+            _repository = repository;
             _env = env;
         }
-        public async Task<IEnumerable<GalleryItemDto>> GetAllAsync()
+
+        public async Task<IEnumerable<GalleryItemDto>> GetAllAsync(string userId, bool isAdmin)
         {
-            var items = await _galleryRepository.GetAllAsync();
-            return items.Select(g => new GalleryItemDto
+            var items = isAdmin ? await _repository.GetAllAsync() : await _repository.GetByUserIdAsync(userId);
+            return items.Select(x => new GalleryItemDto
             {
-                Id = g.Id,
-                Title = g.Title,
-                Description = g.Description,
-                ImageUrl = g.ImageUrl,
-                UploadedAt = g.UploadedAt
+                Id = x.Id,
+                Title = x.Title,
+                ImageUrl = x.ImageUrl,
+                Description = x.Description,
+                UserId = x.UserId
             });
         }
 
-        public async Task<GalleryItemDto> UploadAsync(CreateGalleryItemDto dto)
+        public async Task<GalleryItemDto?> GetByIdAsync(int id, string userId, bool isAdmin)
         {
-            if (dto.ImageFile == null || dto.ImageFile.Length == 0)
-                throw new ArgumentException("Valid image file is required.");
+            var item = await _repository.GetByIdAsync(id);
+            if (item == null || (!isAdmin && item.UserId != userId)) return null;
 
-            string uploadsFolder = Path.Combine(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
-            if (!Directory.Exists(uploadsFolder))
-            {
-                Directory.CreateDirectory(uploadsFolder);
-            }
+            return new GalleryItemDto { Id = item.Id, Title = item.Title, ImageUrl = item.ImageUrl, Description = item.Description, UserId = item.UserId };
+        }
 
-            string uniqueFileName = $"{Guid.NewGuid()}_{Path.GetFileName(dto.ImageFile.FileName)}";
-            string filePath = Path.Combine(uploadsFolder, uniqueFileName);
-
-            using (var stream = new FileStream(filePath, FileMode.Create))
-            {
-                await dto.ImageFile.CopyToAsync(stream);
-            }
+        public async Task<GalleryItemDto> CreateAsync(CreateGalleryItemDto dto, string userId)
+        {
+            string finalImageUrl = await SaveImageAsync(dto);
 
             var item = new GalleryItem
             {
                 Title = dto.Title,
                 Description = dto.Description,
-                ImageUrl = $"/uploads/{uniqueFileName}",
-                UploadedAt = DateTime.UtcNow
+                ImageUrl = finalImageUrl,
+                UserId = userId
             };
 
-            await _galleryRepository.AddAsync(item);
+            var created = await _repository.AddAsync(item);
+            return new GalleryItemDto { Id = created.Id, Title = created.Title, ImageUrl = created.ImageUrl, Description = created.Description, UserId = created.UserId };
+        }
 
-            return new GalleryItemDto
+        public async Task<bool> UpdateAsync(int id, CreateGalleryItemDto dto, string userId, bool isAdmin)
+        {
+            var item = await _repository.GetByIdAsync(id);
+            if (item == null || (!isAdmin && item.UserId != userId)) return false;
+
+            item.Title = dto.Title;
+            item.Description = dto.Description;
+
+            if (dto.ImageFile != null || !string.IsNullOrWhiteSpace(dto.ImageUrl))
             {
-                Id = item.Id,
-                Title = item.Title,
-                Description = item.Description,
-                ImageUrl = item.ImageUrl,
-                UploadedAt = item.UploadedAt
-            };
+                item.ImageUrl = await SaveImageAsync(dto);
+            }
+
+            await _repository.UpdateAsync(item);
+            return true;
+        }
+
+        public async Task<bool> DeleteAsync(int id, string userId, bool isAdmin)
+        {
+            var item = await _repository.GetByIdAsync(id);
+            if (item == null || (!isAdmin && item.UserId != userId)) return false;
+
+            await _repository.DeleteAsync(item);
+            return true;
+        }
+
+        private async Task<string> SaveImageAsync(CreateGalleryItemDto dto)
+        {
+            if (dto.ImageFile != null && dto.ImageFile.Length > 0)
+            {
+                string uploadsFolder = Path.Combine(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
+                if (!Directory.Exists(uploadsFolder)) Directory.CreateDirectory(uploadsFolder);
+
+                string uniqueFileName = Guid.NewGuid().ToString() + "_" + dto.ImageFile.FileName;
+                string filePath = Path.Combine(uploadsFolder, uniqueFileName);
+
+                using (var fileStream = new FileStream(filePath, FileMode.Create))
+                {
+                    await dto.ImageFile.CopyToAsync(fileStream);
+                }
+
+                return $"/uploads/{uniqueFileName}";
+            }
+
+            return dto.ImageUrl ?? string.Empty;
         }
     }
 }

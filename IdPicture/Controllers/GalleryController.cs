@@ -1,39 +1,48 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MyId.Application.DTOs;
 using MyId.Application.Interface;
+using System.Security.Claims;
 
 namespace IdPicture.Controllers
 {
-    [Route("api/[controller]")]
+    [Authorize]
     [ApiController]
+    [Route("api/[controller]")]
     public class GalleryController : ControllerBase
     {
-        private readonly IGalleryService _galleryService;
+        private readonly IGalleryService _service;
 
-        public GalleryController(IGalleryService galleryService)
-        {
-            _galleryService = galleryService;
-        }
+        public GalleryController(IGalleryService service) => _service = service;
 
-        /// <summary>
-        /// Viewers endpoint to retrieve all gallery/portfolio items
-        /// </summary>
+        private string CurrentUserId => User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        private bool IsAdmin => User.IsInRole("Admin");
+
         [HttpGet]
-        public async Task<IActionResult> GetAll()
+        public async Task<IActionResult> GetAll() => Ok(await _service.GetAllAsync(CurrentUserId, IsAdmin));
+
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetById(int id)
         {
-            var items = await _galleryService.GetAllAsync();
-            return Ok(items);
+            var result = await _service.GetByIdAsync(id, CurrentUserId, IsAdmin);
+            return result == null ? NotFound("Record not found or access denied.") : Ok(result);
         }
 
-        /// <summary>
-        /// Upload endpoint for adding new images to the gallery
-        /// </summary>
-        [HttpPost("upload")]
-        public async Task<IActionResult> Upload([FromForm] CreateGalleryItemDto dto)
+        [HttpPost]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> Create([FromForm] CreateGalleryItemDto dto)
         {
-            var result = await _galleryService.UploadAsync(dto);
-            return Ok(result);
+            var result = await _service.CreateAsync(dto, CurrentUserId);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
+
+        [HttpPut("{id}")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> Update(int id, [FromForm] CreateGalleryItemDto dto) =>
+            await _service.UpdateAsync(id, dto, CurrentUserId, IsAdmin) ? NoContent() : NotFound("Record not found or access denied.");
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> Delete(int id) =>
+            await _service.DeleteAsync(id, CurrentUserId, IsAdmin) ? NoContent() : NotFound("Record not found or access denied.");
     }
 }

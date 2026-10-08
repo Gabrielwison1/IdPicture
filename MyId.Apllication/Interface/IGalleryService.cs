@@ -1,16 +1,13 @@
 ﻿using MyId.Application.DTOs;
-using MyId.Domain.Entities;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace MyId.Application.Interface
 {
     public interface IGalleryService
     {
-        Task<IEnumerable<GalleryItemDto>> GetAllAsync();
-        Task<GalleryItemDto> UploadAsync(CreateGalleryItemDto dto);
+        Task<IEnumerable<GalleryItemDto>> GetAllAsync(string userId, bool isAdmin);
+        Task<GalleryItemDto?> GetByIdAsync(int id, string userId, bool isAdmin);
+        Task<GalleryItemDto> CreateAsync(CreateGalleryItemDto dto, string userId);
+        Task<bool> UpdateAsync(int id, CreateGalleryItemDto dto, string userId, bool isAdmin);
+        Task<bool> DeleteAsync(int id, string userId, bool isAdmin);
     }
 }

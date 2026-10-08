@@ -11,6 +11,7 @@ namespace MyId.Application.DTOs
     {
         public string Title { get; set; } = string.Empty;
         public string Description { get; set; } = string.Empty;
-        public IFormFile ImageFile { get; set; } = null!;
+        public string? ImageUrl { get; set; }
+        public IFormFile? ImageFile { get; set; }
     }
 }

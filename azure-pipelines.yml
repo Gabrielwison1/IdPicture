@@ -42,10 +42,11 @@ stages:
 
     - script: |
         dotnet tool install --global dotnet-ef
+        export PATH="$PATH:$HOME/.dotnet/tools"
         dotnet ef database update \
           --project MyId.Persistence/MyId.Persistence.csproj \
           --startup-project IdPicture/IdPicture.csproj \
-          --connection ""
+          --connection "$(DefaultConnection)"
       displayName: 'Apply Entity Framework Migrations to Azure SQL'
 
     - task: DotNetCoreCLI@2

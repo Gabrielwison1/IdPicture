@@ -1,0 +1,88 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  - group: IdPicture-Secrets
+  - name: buildConfiguration
+    value: 'Release'
+  - name: webAppName
+    value: 'idpicture-api'
+  - name: azureServiceConnection
+    value: 'Azure-AppService-Connection'
+
+stages:
+- stage: BuildAndMigrate
+  displayName: 'Build, Run EF Migrations, & Package'
+  jobs:
+  - job: BuildJob
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: UseDotNet@2
+      displayName: 'Install .NET SDK 8.x'
+      inputs:
+        packageType: 'sdk'
+        version: '8.0.x'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet Packages'
+      inputs:
+        command: 'restore'
+        projects: '**/*.csproj'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Solution'
+      inputs:
+        command: 'build'
+        projects: 'IdPicture.sln'
+        arguments: '--configuration  --no-restore'
+
+    - script: |
+        dotnet tool install --global dotnet-ef
+        dotnet ef database update \
+          --project MyId.Persistence/MyId.Persistence.csproj \
+          --startup-project IdPicture/IdPicture.csproj \
+          --connection ""
+      displayName: 'Apply Entity Framework Migrations to Azure SQL'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Web API'
+      inputs:
+        command: 'publish'
+        publishWebProjects: false
+        projects: 'IdPicture/IdPicture.csproj'
+        arguments: '--configuration  --output /publish'
+        zipAfterPublish: true
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Build Artifacts'
+      inputs:
+        PathtoPublish: '/publish'
+        ArtifactName: 'drop'
+
+- stage: Deploy
+  displayName: 'Deploy Web API to Azure App Service'
+  dependsOn: BuildAndMigrate
+  condition: succeeded()
+  jobs:
+  - job: DeployJob
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: DownloadBuildArtifacts@0
+      inputs:
+        buildType: 'current'
+        downloadType: 'single'
+        artifactName: 'drop'
+        downloadPath: ''
+
+    - task: AzureWebApp@1
+      displayName: 'Azure App Service Deploy'
+      inputs:
+        azureSubscription: ''
+        appType: 'webApp'
+        appName: ''
+        package: '/drop/*.zip'
+        appSettings: '-ConnectionStrings:DefaultConnection ""'

@@ -1,0 +1,12 @@
+﻿using Microsoft.AspNetCore.Mvc;
+
+namespace IdPicture.wwwroot.uploads
+{
+    public class _ : Controller
+    {
+        public IActionResult Index()
+        {
+            return View();
+        }
+    }
+}

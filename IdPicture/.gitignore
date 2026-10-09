@@ -1,0 +1,3 @@
+# Ignore uploaded user files
+wwwroot/uploads/*
+!wwwroot/uploads/.gitkeep

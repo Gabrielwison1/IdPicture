@@ -131,10 +131,9 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "IdPicture API v1");
-        c.RoutePrefix = "swagger"; // Serves Swagger UI at /swagger (matches default browser launch settings)
+        c.RoutePrefix = "swagger"; // Serves Swagger UI at /swagger
     });
 }
-
 
 app.UseHttpsRedirection();
 
@@ -142,7 +141,7 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 
 // 2. Ensure external persistent directory exists (C:\home\site\gallery_uploads)
-var persistentUploadsPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "uploads"));
+var persistentUploadsPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "gallery_uploads"));
 if (!Directory.Exists(persistentUploadsPath))
 {
     Directory.CreateDirectory(persistentUploadsPath);
@@ -152,7 +151,7 @@ if (!Directory.Exists(persistentUploadsPath))
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(persistentUploadsPath),
-    RequestPath = "/uploads"
+    RequestPath = "/gallery_uploads"
 });
 
 app.UseAuthentication();

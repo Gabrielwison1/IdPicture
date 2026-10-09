@@ -83,18 +83,24 @@ namespace MyId.Application.Services
         {
             if (dto.ImageFile != null && dto.ImageFile.Length > 0)
             {
-                string uploadsFolder = Path.Combine(_env.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
-                if (!Directory.Exists(uploadsFolder)) Directory.CreateDirectory(uploadsFolder);
+                // Point to persistent directory outside wwwroot (C:\home\site\gallery_uploads)
+                string persistentUploadsPath = Path.GetFullPath(Path.Combine(_env.ContentRootPath, "..", "gallery_uploads"));
 
-                string uniqueFileName = Guid.NewGuid().ToString() + "_" + dto.ImageFile.FileName;
-                string filePath = Path.Combine(uploadsFolder, uniqueFileName);
+                // Explicitly ensure folder exists on Azure 
+                if (!Directory.Exists(persistentUploadsPath))
+                {
+                    Directory.CreateDirectory(persistentUploadsPath);
+                }
+
+                string uniqueFileName = $"{Guid.NewGuid()}_{dto.ImageFile.FileName}";
+                string filePath = Path.Combine(persistentUploadsPath, uniqueFileName);
 
                 using (var fileStream = new FileStream(filePath, FileMode.Create))
                 {
                     await dto.ImageFile.CopyToAsync(fileStream);
                 }
 
-                return $"/uploads/{uniqueFileName}";
+                return $"/gallery_uploads/{uniqueFileName}";
             }
 
             return dto.ImageUrl ?? string.Empty;

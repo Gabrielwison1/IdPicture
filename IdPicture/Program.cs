@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using MyId.Application.Interface;
@@ -134,10 +135,25 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     });
 }
 
+
 app.UseHttpsRedirection();
 
-// Enable Static Files for Image Upload Access (wwwroot/uploads)
+// 1. Serve standard static files from wwwroot (CSS, JS, favicons)
 app.UseStaticFiles();
+
+// 2. Ensure external persistent directory exists (C:\home\site\gallery_uploads)
+var persistentUploadsPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "uploads"));
+if (!Directory.Exists(persistentUploadsPath))
+{
+    Directory.CreateDirectory(persistentUploadsPath);
+}
+
+// 3. Serve uploaded files from C:\home\site\gallery_uploads at the path /gallery_uploads
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(persistentUploadsPath),
+    RequestPath = "/uploads"
+});
 
 app.UseAuthentication();
 app.UseAuthorization();

@@ -9,7 +9,7 @@ COPY . .
 RUN dotnet restore "IdPicture.sln"
 
 # Build and publish the web project from the root workdir
-RUN dotnet publish "IdPicture.csproj" -c Release -o /app/publish /p:UseAppHost=false
+RUN dotnet publish "IdPicture/IdPicture.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 # Stage 2: Runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime

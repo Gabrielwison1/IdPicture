@@ -8,8 +8,7 @@ COPY . .
 # Restore NuGet packages using the solution file at the root
 RUN dotnet restore "IdPicture.sln"
 
-# Build and publish the web project from its nested folder path
-WORKDIR "/src/IdPicture/IdPicture"
+# Build and publish the web project from the root workdir
 RUN dotnet publish "IdPicture.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 # Stage 2: Runtime image

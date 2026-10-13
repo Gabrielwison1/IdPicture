@@ -13,11 +13,26 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// DbContext with explicit MigrationsAssembly & Transient Error Resiliency for Azure SQL
+// Dynamic DbContext Configuration for Local SQL Server vs Render PostgreSQL
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
-        sqlOptions =>
+{
+    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+
+    if (!string.IsNullOrEmpty(connectionString) && connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    {
+        options.UseNpgsql(connectionString, npgsqlOptions =>
+        {
+            npgsqlOptions.MigrationsAssembly("MyId.Persistence");
+            npgsqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(30),
+                errorCodesToAdd: null
+            );
+        });
+    }
+    else
+    {
+        options.UseSqlServer(connectionString, sqlOptions =>
         {
             sqlOptions.MigrationsAssembly("MyId.Persistence");
             sqlOptions.EnableRetryOnFailure(
@@ -25,8 +40,9 @@ builder.Services.AddDbContext<AppDbContext>(options =>
                 maxRetryDelay: TimeSpan.FromSeconds(30),
                 errorNumbersToAdd: null
             );
-        }
-    ));
+        });
+    }
+});
 
 // Identity Configuration
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
@@ -124,30 +140,27 @@ using (var scope = app.Services.CreateScope())
     }
 }
 
-// Enable Swagger UI in Development AND Production (Azure App Service)
+// Enable Swagger UI in Development AND Production
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "IdPicture API v1");
-        c.RoutePrefix = "swagger"; // Serves Swagger UI at /swagger
+        c.RoutePrefix = "swagger";
     });
 }
 
 app.UseHttpsRedirection();
 
-// 1. Serve standard static files from wwwroot (CSS, JS, favicons)
 app.UseStaticFiles();
 
-// 2. Ensure external persistent directory exists (C:\home\site\gallery_uploads)
 var persistentUploadsPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "gallery_uploads"));
 if (!Directory.Exists(persistentUploadsPath))
 {
     Directory.CreateDirectory(persistentUploadsPath);
 }
 
-// 3. Serve uploaded files from C:\home\site\gallery_uploads at the path /gallery_uploads
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new PhysicalFileProvider(persistentUploadsPath),
@@ -165,7 +178,6 @@ app.Run();
 // ---------------------------------------------------------------------
 static async Task SeedAdminUserAsync(UserManager<ApplicationUser> userManager, RoleManager<IdentityRole> roleManager)
 {
-    // 1. Ensure Roles Exist
     string[] roles = { "Admin", "User" };
     foreach (var role in roles)
     {
@@ -175,11 +187,9 @@ static async Task SeedAdminUserAsync(UserManager<ApplicationUser> userManager, R
         }
     }
 
-    // 2. Define Hardcoded Admin Credentials
     string adminEmail = "admin@idpicture.com";
     string adminPassword = "AdminSecurePass2026!";
 
-    // 3. Seed Admin User if not existing
     var adminUser = await userManager.FindByEmailAsync(adminEmail);
     if (adminUser == null)
     {

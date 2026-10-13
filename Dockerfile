@@ -2,28 +2,21 @@
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 
-# Copy the solution file and project files first for optimal caching
-COPY ["IdPicture.sln", "./"]
-COPY ["IdPicture/IdPicture.csproj", "IdPicture/"]
-COPY ["MyId.Application/MyId.Application.csproj", "MyId.Application/"]
-COPY ["MyId.Infrastructure/MyId.Infrastructure.csproj", "MyId.Infrastructure/"]
-COPY ["MyId.Persistence/MyId.Persistence.csproj", "MyId.Persistence/"]
-
-# Restore NuGet packages for the solution
-RUN dotnet restore "IdPicture.sln"
-
-# Copy the rest of the source code files
+# Copy all repository files into the container
 COPY . .
 
-# Build and publish the main web project
-WORKDIR "/src/IdPicture"
+# Restore NuGet packages using the solution file at the root
+RUN dotnet restore "IdPicture.sln"
+
+# Build and publish the web project from its nested folder path
+WORKDIR "/src/IdPicture/IdPicture"
 RUN dotnet publish "IdPicture.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 # Stage 2: Runtime image
 FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
-# Copy published output from build stage
+# Copy the published output from the build stage
 COPY --from=build /app/publish .
 
 # Render requires web services to listen on port 10000

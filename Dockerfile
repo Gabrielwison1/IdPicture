@@ -22,4 +22,10 @@ COPY --from=build /app/publish .
 ENV PORT=10000
 ENV ASPNETCORE_URLS=http://0.0.0.0:10000
 
-ENTRYPOINT ["dotnet", "IdPicture.dll"]
+# Explicitly set Production so appsettings.json loads (not Development.json)
+ENV ASPNETCORE_ENVIRONMENT=Production
+
+# Helpful for container-aware diagnostics
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+
+ENTRYPOINT ["dotnet", "IdPicture.dll"]

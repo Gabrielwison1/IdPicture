@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.FileProviders;
@@ -13,13 +14,56 @@ using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Dynamic DbContext Configuration for Local SQL Server vs Render PostgreSQL
+// ─────────────────────────────────────────────────────────────
+// CORS — allow all origins (Swagger UI + any frontend)
+// ─────────────────────────────────────────────────────────────
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
+// ─────────────────────────────────────────────────────────────
+// Forward headers — required for Render's reverse proxy
+// (safe to include locally; has no effect when no proxy is present)
+// ─────────────────────────────────────────────────────────────
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
+
+// ─────────────────────────────────────────────────────────────
+// DbContext — supports both environments:
+//   LOCAL:      appsettings.Development.json → SQL Server
+//   RENDER:     DATABASE_URL env var         → PostgreSQL
+//
+// Render automatically sets DATABASE_URL as a postgres:// URI.
+// Locally, appsettings.Development.json provides the SQL Server
+// connection string via ConnectionStrings:DefaultConnection.
+// ─────────────────────────────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
-    var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+    // Render sets DATABASE_URL automatically for linked PostgreSQL databases
+    var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
 
-    if (!string.IsNullOrEmpty(connectionString) && connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase))
+    // Fall back to appsettings (used locally with SQL Server)
+    var connectionString = !string.IsNullOrEmpty(databaseUrl)
+        ? databaseUrl
+        : builder.Configuration.GetConnectionString("DefaultConnection");
+
+    var isPostgres = !string.IsNullOrEmpty(connectionString) &&
+                     (connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase) ||
+                      connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase));
+
+    if (isPostgres)
     {
+        // PostgreSQL — Render production
         options.UseNpgsql(connectionString, npgsqlOptions =>
         {
             npgsqlOptions.MigrationsAssembly("MyId.Persistence");
@@ -32,6 +76,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     }
     else
     {
+        // SQL Server — local development
         options.UseSqlServer(connectionString, sqlOptions =>
         {
             sqlOptions.MigrationsAssembly("MyId.Persistence");
@@ -44,13 +89,22 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     }
 });
 
-// Identity Configuration
+// ─────────────────────────────────────────────────────────────
+// Identity
+// ─────────────────────────────────────────────────────────────
 builder.Services.AddIdentity<ApplicationUser, IdentityRole>()
     .AddEntityFrameworkStores<AppDbContext>()
     .AddDefaultTokenProviders();
 
-// JWT Authentication Setup
-var jwtKey = builder.Configuration["Jwt:Key"] ?? "SUPER_SECRET_KEY_FOR_JWT_TOKEN_AUTHENTICATION_12345!";
+// ─────────────────────────────────────────────────────────────
+// JWT Authentication
+//   LOCAL:  Jwt:Key comes from appsettings.Development.json
+//   RENDER: Set environment variables Jwt__Key, Jwt__Issuer, Jwt__Audience
+//           (double underscore = colon separator in Render env vars)
+// ─────────────────────────────────────────────────────────────
+var jwtKey = builder.Configuration["Jwt:Key"]
+    ?? "SUPER_SECRET_KEY_FOR_JWT_TOKEN_AUTHENTICATION_12345!"; // fallback for safety
+
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -70,14 +124,18 @@ builder.Services.AddAuthentication(options =>
     };
 });
 
-// Dependency Injection - Repositories
+// ─────────────────────────────────────────────────────────────
+// Dependency Injection — Repositories
+// ─────────────────────────────────────────────────────────────
 builder.Services.AddScoped<IEducationRepository, EducationRepository>();
 builder.Services.AddScoped<IExperienceRepository, ExperienceRepository>();
 builder.Services.AddScoped<ISkillRepository, SkillRepository>();
 builder.Services.AddScoped<IGalleryRepository, GalleryRepositories>();
 builder.Services.AddScoped<ITaxCalculatorRepository, TaxCalculatorRepository>();
 
-// Dependency Injection - Application Services
+// ─────────────────────────────────────────────────────────────
+// Dependency Injection — Application Services
+// ─────────────────────────────────────────────────────────────
 builder.Services.AddScoped<IEducationService, EducationService>();
 builder.Services.AddScoped<IExperienceService, ExperienceService>();
 builder.Services.AddScoped<ISkillService, SkillService>();
@@ -87,14 +145,16 @@ builder.Services.AddScoped<ITaxCalculatorService, TaxCalculatorService>();
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// Swagger Generator Configuration with Bearer Auth
+// ─────────────────────────────────────────────────────────────
+// Swagger with Bearer Auth
+// ─────────────────────────────────────────────────────────────
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "IdPicture API", Version = "v1" });
 
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Description = "JWT Authorization header using the Bearer scheme. Enter your JWT token directly below without typing 'Bearer'.",
+        Description = "JWT Authorization: paste your token below (without 'Bearer ' prefix).",
         Name = "Authorization",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.Http,
@@ -120,14 +180,32 @@ builder.Services.AddSwaggerGen(c =>
 
 var app = builder.Build();
 
-// Auto-Apply Database Migrations & Seed Admin User on Startup
+// ─────────────────────────────────────────────────────────────
+// Auto-Apply Migrations & Seed Admin User on Startup
+//
+// Strategy:
+//   • PostgreSQL (Render): MigrateAsync() — applies EF migrations
+//   • SQL Server  (local): EnsureCreated() — creates schema without
+//     migrations, preserving existing local data on restart
+// ─────────────────────────────────────────────────────────────
 using (var scope = app.Services.CreateScope())
 {
     var services = scope.ServiceProvider;
     try
     {
         var context = services.GetRequiredService<AppDbContext>();
-        await context.Database.MigrateAsync();
+        var providerName = context.Database.ProviderName ?? string.Empty;
+
+        if (providerName.Contains("Npgsql", StringComparison.OrdinalIgnoreCase))
+        {
+            // Production (Render) — run EF Core migrations
+            await context.Database.MigrateAsync();
+        }
+        else
+        {
+            // Local development (SQL Server) — create schema if it doesn't exist
+            await context.Database.EnsureCreatedAsync();
+        }
 
         var userManager = services.GetRequiredService<UserManager<ApplicationUser>>();
         var roleManager = services.GetRequiredService<RoleManager<IdentityRole>>();
@@ -136,26 +214,38 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred while seeding the database.");
+        logger.LogError(ex, "An error occurred while migrating or seeding the database.");
     }
 }
 
-// Enable Swagger UI in Development AND Production
-if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "IdPicture API v1");
-        c.RoutePrefix = "swagger";
-    });
-}
+// ─────────────────────────────────────────────────────────────
+// Middleware Pipeline
+// ─────────────────────────────────────────────────────────────
 
-app.UseHttpsRedirection();
+// Must come first — resolves X-Forwarded-Proto from Render's load balancer
+app.UseForwardedHeaders();
+
+// Swagger — enabled in all environments (local + Render)
+app.UseSwagger();
+app.UseSwaggerUI(c =>
+{
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "IdPicture API v1");
+    c.RoutePrefix = "swagger";
+});
+
+// ⚠ UseHttpsRedirection intentionally removed:
+// Render terminates TLS at its edge — the container only receives HTTP on port 10000.
+// Adding HTTPS redirect causes redirect loops and breaks Swagger on Render.
+// Local dev: HTTPS profile in launchSettings.json handles this natively.
+
+app.UseCors("AllowAll");
 
 app.UseStaticFiles();
 
-var persistentUploadsPath = Path.GetFullPath(Path.Combine(app.Environment.ContentRootPath, "..", "gallery_uploads"));
+// Gallery uploads — path outside wwwroot for persistence
+var persistentUploadsPath = Path.GetFullPath(
+    Path.Combine(app.Environment.ContentRootPath, "..", "gallery_uploads"));
+
 if (!Directory.Exists(persistentUploadsPath))
 {
     Directory.CreateDirectory(persistentUploadsPath);
@@ -173,10 +263,12 @@ app.MapControllers();
 
 app.Run();
 
-// ---------------------------------------------------------------------
-// HELPER METHOD: Hardcoded Admin Seeding
-// ---------------------------------------------------------------------
-static async Task SeedAdminUserAsync(UserManager<ApplicationUser> userManager, RoleManager<IdentityRole> roleManager)
+// ─────────────────────────────────────────────────────────────
+// Helper: Seed Admin User
+// ─────────────────────────────────────────────────────────────
+static async Task SeedAdminUserAsync(
+    UserManager<ApplicationUser> userManager,
+    RoleManager<IdentityRole> roleManager)
 {
     string[] roles = { "Admin", "User" };
     foreach (var role in roles)

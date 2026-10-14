@@ -53,16 +53,19 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
 
     // Fall back to appsettings (used locally with SQL Server)
-    var connectionString = !string.IsNullOrEmpty(databaseUrl)
+    var rawConnection = !string.IsNullOrEmpty(databaseUrl)
         ? databaseUrl
         : builder.Configuration.GetConnectionString("DefaultConnection");
 
-    var isPostgres = !string.IsNullOrEmpty(connectionString) &&
-                     (connectionString.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase) ||
-                      connectionString.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase));
+    var isPostgres = !string.IsNullOrEmpty(rawConnection) &&
+                     (rawConnection.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase) ||
+                      rawConnection.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase));
 
     if (isPostgres)
     {
+        // Npgsql 8.x does NOT support postgres:// URI format — must convert to key=value string
+        var connectionString = ConvertPostgresUriToConnectionString(rawConnection!);
+
         // PostgreSQL — Render production
         options.UseNpgsql(connectionString, npgsqlOptions =>
         {
@@ -77,7 +80,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     else
     {
         // SQL Server — local development
-        options.UseSqlServer(connectionString, sqlOptions =>
+        options.UseSqlServer(rawConnection, sqlOptions =>
         {
             sqlOptions.MigrationsAssembly("MyId.Persistence");
             sqlOptions.EnableRetryOnFailure(
@@ -298,5 +301,45 @@ static async Task SeedAdminUserAsync(
         {
             await userManager.AddToRoleAsync(admin, "Admin");
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Helper: Convert Render's postgres:// URI → Npgsql connection string
+//
+// Npgsql 8.x cannot parse postgres:// or postgresql:// URI format.
+// Render's DATABASE_URL is always in URI format, so we convert it.
+//
+// Input:  postgres://user:password@host:5432/database
+// Output: Host=host;Port=5432;Database=database;Username=user;Password=password;SSL Mode=Prefer;Trust Server Certificate=true
+// ─────────────────────────────────────────────────────────────
+static string ConvertPostgresUriToConnectionString(string uri)
+{
+    try
+    {
+        // Uri class requires a valid scheme — normalise postgres:// → postgresql://
+        var normalized = uri.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase)
+            ? "postgresql://" + uri["postgres://".Length..]
+            : uri;
+
+        var parsed = new Uri(normalized);
+
+        var host     = parsed.Host;
+        var port     = parsed.Port > 0 ? parsed.Port : 5432;
+        var database = parsed.AbsolutePath.TrimStart('/');
+
+        // UserInfo is "username:password" — split on first colon only
+        var userParts = parsed.UserInfo.Split(':', 2);
+        var username  = Uri.UnescapeDataString(userParts[0]);
+        var password  = userParts.Length > 1 ? Uri.UnescapeDataString(userParts[1]) : string.Empty;
+
+        // SSL Mode=Prefer works for both Render internal (no SSL) and external (SSL) connections
+        return $"Host={host};Port={port};Database={database};Username={username};Password={password};" +
+               $"SSL Mode=Prefer;Trust Server Certificate=true";
+    }
+    catch
+    {
+        // If parsing fails for any reason, return the original and let Npgsql try
+        return uri;
     }
 }
